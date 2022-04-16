@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io::{self, Write, BufWriter};
 
 use crossterm::style::{Color, Colors};
 use crossterm::{cursor, style, terminal, QueueableCommand};
@@ -66,7 +66,7 @@ impl DrawTarget for TerminalDisplay {
         let bounding_box = self.resize()?;
 
         let stdout = io::stdout();
-        let mut stdout = stdout.lock();
+        let mut stdout = BufWriter::new(stdout.lock());
         for Pixel(point, color) in pixels {
             if bounding_box.contains(point) {
                 // We've just checked that these coordinates fall within the bounds of the terminal,
@@ -100,6 +100,7 @@ impl DrawTarget for TerminalDisplay {
                 stdout.write_all("▄".as_bytes())?;
             }
         }
+        stdout.flush()?;
         Ok(())
     }
 }
