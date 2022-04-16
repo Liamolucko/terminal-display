@@ -1,7 +1,7 @@
 use std::io;
 use std::time::Instant;
 
-use crossterm::{ExecutableCommand, cursor};
+use crossterm::{cursor, ExecutableCommand};
 use embedded_graphics_core::pixelcolor::Rgb888;
 use embedded_graphics_core::prelude::{Dimensions, DrawTarget, PointsIter};
 use palette::{Hsv, IntoColor, IntoComponent, Srgb};
