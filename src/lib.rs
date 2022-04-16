@@ -1,10 +1,13 @@
 use std::io::{self, BufWriter, Stdout, Write};
 
-use crossterm::style::Color;
+use crossterm::style::Color as CrosstermColor;
 use crossterm::{cursor, style, terminal, QueueableCommand};
-use embedded_graphics_core::pixelcolor::Rgb888;
 use embedded_graphics_core::prelude::*;
 use embedded_graphics_core::primitives::Rectangle;
+
+mod color;
+
+pub use color::Color;
 
 /// An implementation of `embedded_graphics::DrawTarget` for the terminal using
 /// crossterm.
@@ -17,12 +20,12 @@ use embedded_graphics_core::primitives::Rectangle;
 ///
 /// [`TerminalDisplay::flush`]: crate::TerminalDisplay::flush
 pub struct TerminalDisplay {
-    /// A tuple of the (foreground_color, background_color) of every cell.
+    /// A tuple of the (top_color, bottom_color) of every cell.
     ///
     /// This is needed because it's impossible to get back the color of a cell,
     /// and we need to preserve the color of the other half of the cell when
     /// writing a single pixel.
-    buffer: Vec<Vec<(Rgb888, Rgb888)>>,
+    buffer: Vec<Vec<(Color, Color)>>,
     /// We need to store this between runs so that
     stdout: BufWriter<Stdout>,
 }
@@ -47,12 +50,12 @@ impl TerminalDisplay {
         let (width, height) = terminal::size()?;
         if self.buffer.get(0).map_or(0, |row| row.len()) != width.into() {
             for row in &mut self.buffer {
-                row.resize(width.into(), (Rgb888::BLACK, Rgb888::BLACK));
+                row.resize(width.into(), (Color::BgColor, Color::BgColor));
             }
         }
         if self.buffer.len() != height.into() {
             self.buffer.resize_with(height.into(), || {
-                vec![(Rgb888::BLACK, Rgb888::BLACK); width.into()]
+                vec![(Color::BgColor, Color::BgColor); width.into()]
             })
         }
 
@@ -66,29 +69,47 @@ impl TerminalDisplay {
         &mut self,
         row: u16,
         column: u16,
-        foreground_color: Option<Rgb888>,
-        background_color: Option<Rgb888>,
+        top_color: Option<Color>,
+        bottom_color: Option<Color>,
     ) -> io::Result<()> {
-        let (foreground, background) = &mut self.buffer[usize::from(row)][usize::from(column)];
-        if let Some(color) = foreground_color {
-            *foreground = color;
+        let (saved_top_color, saved_bottom_color) =
+            &mut self.buffer[usize::from(row)][usize::from(column)];
+
+        if let Some(color) = top_color {
+            *saved_top_color = color;
         }
-        if let Some(color) = background_color {
-            *background = color;
+        if let Some(color) = bottom_color {
+            *saved_bottom_color = color;
         }
 
-        self.stdout.queue(style::SetForegroundColor(Color::Rgb {
-            r: foreground.r(),
-            g: foreground.g(),
-            b: foreground.b(),
-        }))?;
-        self.stdout.queue(style::SetBackgroundColor(Color::Rgb {
-            r: background.r(),
-            g: background.g(),
-            b: background.b(),
-        }))?;
-
-        self.stdout.write_all("▄".as_bytes())
+        match (*saved_top_color, *saved_bottom_color) {
+            (Color::BgColor, Color::BgColor) => {
+                self.stdout
+                    .queue(style::SetBackgroundColor(CrosstermColor::Reset))?;
+                self.stdout.write_all(" ".as_bytes())
+            }
+            (Color::FgColor, Color::FgColor) => {
+                self.stdout
+                    .queue(style::SetForegroundColor(CrosstermColor::Reset))?;
+                self.stdout.write_all("█".as_bytes())
+            }
+            (top_color, bottom_color)
+                if top_color != Color::FgColor && bottom_color != Color::BgColor =>
+            {
+                self.stdout
+                    .queue(style::SetBackgroundColor(top_color.to_crossterm_color()))?;
+                self.stdout
+                    .queue(style::SetForegroundColor(bottom_color.to_crossterm_color()))?;
+                self.stdout.write_all("▄".as_bytes())
+            }
+            (top_color, bottom_color) => {
+                self.stdout
+                    .queue(style::SetBackgroundColor(bottom_color.to_crossterm_color()))?;
+                self.stdout
+                    .queue(style::SetForegroundColor(top_color.to_crossterm_color()))?;
+                self.stdout.write_all("▀".as_bytes())
+            }
+        }
     }
 }
 
@@ -100,7 +121,7 @@ impl OriginDimensions for TerminalDisplay {
 }
 
 impl DrawTarget for TerminalDisplay {
-    type Color = Rgb888;
+    type Color = Color;
 
     type Error = io::Error;
 
@@ -118,16 +139,14 @@ impl DrawTarget for TerminalDisplay {
                 let row = (point.y / 2) as u16;
                 self.stdout.queue(cursor::MoveTo(column, row))?;
 
-                let mut foreground_color = None;
-                let mut background_color = None;
+                let mut top_color = None;
+                let mut bottom_color = None;
                 if point.y % 2 == 0 {
-                    // Since we're using '▄' as our character, the color of the top half of the
-                    // pixel is the background color.
-                    background_color = Some(color);
+                    top_color = Some(color);
                 } else {
-                    foreground_color = Some(color);
+                    bottom_color = Some(color);
                 }
-                self.write_pixel(row, column, foreground_color, background_color)?;
+                self.write_pixel(row, column, top_color, bottom_color)?;
             }
         }
         Ok(())
@@ -192,25 +211,22 @@ impl DrawTarget for TerminalDisplay {
                 // Wait until the bottom half of the pixel to write it (unless this is the last
                 // row). Our main bottleneck is actually writing to the tty, so the less we
                 // write the better.
-                if !is_top_half || Some(y) == drawn_box.bottom_right().map(|point| point.y)
-                {
-                    let mut foreground_color = None;
-                    let mut background_color = None;
+                if !is_top_half || Some(y) == drawn_box.bottom_right().map(|point| point.y) {
+                    let mut top_color = None;
+                    let mut bottom_color = None;
                     if is_top_half {
-                        // Since we're using '▄' as our character, the color of the top half of the
-                        // pixel is the background color.
-                        background_color = color;
+                        top_color = color;
                     } else {
-                        foreground_color = color;
+                        bottom_color = color;
                     }
 
-                    self.write_pixel(row, column, foreground_color, background_color)?;
+                    self.write_pixel(row, column, top_color, bottom_color)?;
                 } else {
-                    let (_, background) = &mut self.buffer[usize::from(row)][usize::from(column)];
+                    let (top_color, _) = &mut self.buffer[usize::from(row)][usize::from(column)];
                     // This has to be the top half of the pixel, otherwise we would have taken the
                     // other branch.
                     // Set this so that it will be read when writing the other half of this cell.
-                    *background = color.expect(
+                    *top_color = color.expect(
                         "if color is none, we should have already returned early by this point",
                     );
                 }

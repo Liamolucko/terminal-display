@@ -5,7 +5,7 @@ use crossterm::{cursor, ExecutableCommand};
 use embedded_graphics_core::pixelcolor::Rgb888;
 use embedded_graphics_core::prelude::*;
 use palette::{Hsv, IntoColor, IntoComponent, Srgb};
-use terminal_display::TerminalDisplay;
+use terminal_display::{Color, TerminalDisplay};
 
 fn main() -> io::Result<()> {
     let mut display = TerminalDisplay::new()?;
@@ -21,11 +21,11 @@ fn main() -> io::Result<()> {
             bounding_box.points().map(|point| {
                 let hue = point.x as f64 - point.y as f64 + elapsed.as_secs_f64() * 200.0;
                 let color: Srgb<f64> = Hsv::new(hue, 1.0, 1.0).into_color();
-                Rgb888::new(
+                Color::Rgb(Rgb888::new(
                     color.red.into_component(),
                     color.green.into_component(),
                     color.blue.into_component(),
-                )
+                ))
             }),
         )?;
         display.flush()?;
