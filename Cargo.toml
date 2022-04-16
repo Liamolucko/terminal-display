@@ -1,0 +1,11 @@
+[package]
+name = "terminal-display"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crossterm = "0.23.2"
+embedded-graphics-core = "0.3.3"
+
+[dev-dependencies]
+palette = "0.6.0"
