@@ -1,6 +1,7 @@
-use std::io::{Write, self};
+use std::io;
 use std::time::Instant;
 
+use crossterm::{ExecutableCommand, cursor};
 use embedded_graphics_core::pixelcolor::Rgb888;
 use embedded_graphics_core::prelude::{Dimensions, DrawTarget, PointsIter};
 use palette::{Hsv, IntoColor, IntoComponent, Srgb};
@@ -8,6 +9,9 @@ use terminal_display::TerminalDisplay;
 
 fn main() -> io::Result<()> {
     let mut display = TerminalDisplay::new()?;
+
+    io::stdout().execute(cursor::Hide)?;
+
     let start = Instant::now();
     loop {
         let bounding_box = display.bounding_box();
@@ -24,6 +28,5 @@ fn main() -> io::Result<()> {
                 )
             }),
         )?;
-        io::stdout().flush()?;
     }
 }
