@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crossterm::{cursor, ExecutableCommand};
 use embedded_graphics_core::pixelcolor::Rgb888;
-use embedded_graphics_core::prelude::{Dimensions, DrawTarget, PointsIter};
+use embedded_graphics_core::prelude::*;
 use palette::{Hsv, IntoColor, IntoComponent, Srgb};
 use terminal_display::TerminalDisplay;
 
@@ -28,5 +28,6 @@ fn main() -> io::Result<()> {
                 )
             }),
         )?;
+        display.flush()?;
     }
 }

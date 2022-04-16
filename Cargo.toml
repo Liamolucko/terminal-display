@@ -14,4 +14,5 @@ crossterm = "0.23.2"
 embedded-graphics-core = "0.3.3"
 
 [dev-dependencies]
+embedded-graphics = "0.7.1"
 palette = "0.6.0"

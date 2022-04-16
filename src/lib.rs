@@ -1,4 +1,4 @@
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Stdout, Write};
 
 use crossterm::style::Color;
 use crossterm::{cursor, style, terminal, QueueableCommand};
@@ -11,6 +11,11 @@ use embedded_graphics_core::primitives::Rectangle;
 ///
 /// A pixel is half of a character in the terminal, since they're usually about
 /// 1x2.
+///
+/// To show the rendered image, the buffer must be flushed by calling
+/// [`TerminalDisplay::flush`].
+///
+/// [`TerminalDisplay::flush`]: crate::TerminalDisplay::flush
 pub struct TerminalDisplay {
     /// A tuple of the (foreground_color, background_color) of every cell.
     ///
@@ -18,13 +23,22 @@ pub struct TerminalDisplay {
     /// and we need to preserve the color of the other half of the cell when
     /// writing a single pixel.
     buffer: Vec<Vec<(Rgb888, Rgb888)>>,
+    /// We need to store this between runs so that
+    stdout: BufWriter<Stdout>,
 }
 
 impl TerminalDisplay {
     pub fn new() -> io::Result<Self> {
-        let mut this = Self { buffer: Vec::new() };
+        let mut this = Self {
+            buffer: Vec::new(),
+            stdout: BufWriter::new(io::stdout()),
+        };
         this.resize()?;
         Ok(this)
+    }
+
+    pub fn flush(&mut self) -> io::Result<()> {
+        self.stdout.flush()
     }
 
     /// Resize the buffer to the correct size if it's changed, and return the
@@ -50,7 +64,6 @@ impl TerminalDisplay {
 
     fn write_pixel(
         &mut self,
-        mut stdout: impl Write,
         row: u16,
         column: u16,
         foreground_color: Option<Rgb888>,
@@ -64,18 +77,18 @@ impl TerminalDisplay {
             *background = color;
         }
 
-        stdout.queue(style::SetForegroundColor(Color::Rgb {
+        self.stdout.queue(style::SetForegroundColor(Color::Rgb {
             r: foreground.r(),
             g: foreground.g(),
             b: foreground.b(),
         }))?;
-        stdout.queue(style::SetBackgroundColor(Color::Rgb {
+        self.stdout.queue(style::SetBackgroundColor(Color::Rgb {
             r: background.r(),
             g: background.g(),
             b: background.b(),
         }))?;
 
-        stdout.write_all("▄".as_bytes())
+        self.stdout.write_all("▄".as_bytes())
     }
 }
 
@@ -97,15 +110,13 @@ impl DrawTarget for TerminalDisplay {
     {
         let bounding_box = self.resize()?;
 
-        let stdout = io::stdout();
-        let mut stdout = BufWriter::new(stdout.lock());
         for Pixel(point, color) in pixels {
             if bounding_box.contains(point) {
                 // We've just checked that these coordinates fall within the bounds of the
                 // terminal, so they must fit within a u16.
                 let column = point.x as u16;
                 let row = (point.y / 2) as u16;
-                stdout.queue(cursor::MoveTo(column, row))?;
+                self.stdout.queue(cursor::MoveTo(column, row))?;
 
                 let mut foreground_color = None;
                 let mut background_color = None;
@@ -116,10 +127,9 @@ impl DrawTarget for TerminalDisplay {
                 } else {
                     foreground_color = Some(color);
                 }
-                self.write_pixel(&mut stdout, row, column, foreground_color, background_color)?;
+                self.write_pixel(row, column, foreground_color, background_color)?;
             }
         }
-        stdout.flush()?;
         Ok(())
     }
 
@@ -149,17 +159,15 @@ impl DrawTarget for TerminalDisplay {
             }
         }
 
-        let stdout = io::stdout();
-        let mut stdout = BufWriter::new(stdout.lock());
-        for row in drawn_box.rows() {
-            let is_top_half = row % 2 == 0;
+        for y in drawn_box.rows() {
+            let is_top_half = y % 2 == 0;
 
             // Move the cursor to the start of the row.
             // We know these will fit in `u16`s because they have to be within
             // our bounding box of the terminal.
             let column = drawn_box.top_left.x as u16;
-            let row = (row / 2) as u16;
-            stdout.queue(cursor::MoveTo(column, row))?;
+            let row = (y / 2) as u16;
+            self.stdout.queue(cursor::MoveTo(column, row))?;
 
             // Skip the out-of-bounds part at the start of this row.
             advance_by(
@@ -167,25 +175,24 @@ impl DrawTarget for TerminalDisplay {
                 usize::try_from(drawn_box.top_left.x - area.top_left.x).unwrap_or(usize::MAX),
             );
 
-            for column in drawn_box.columns() {
-                let column = column as u16;
+            for x in drawn_box.columns() {
+                let column = x as u16;
 
                 let color = colors.next();
                 if color.is_none()
                     && (is_top_half
-                        || i32::from(row) == drawn_box.top_left.y
-                        || Some(row.into()) == drawn_box.bottom_right().map(|point| point.y))
+                        || y == drawn_box.top_left.y
+                        || Some(y) == drawn_box.bottom_right().map(|point| point.y))
                 {
                     // Return early, as long as we don't still need to draw for the sake of the top
                     // half.
-                    stdout.flush()?;
                     return Ok(());
                 }
 
                 // Wait until the bottom half of the pixel to write it (unless this is the last
                 // row). Our main bottleneck is actually writing to the tty, so the less we
                 // write the better.
-                if !is_top_half || Some(row.into()) == drawn_box.bottom_right().map(|point| point.y)
+                if !is_top_half || Some(y) == drawn_box.bottom_right().map(|point| point.y)
                 {
                     let mut foreground_color = None;
                     let mut background_color = None;
@@ -197,7 +204,7 @@ impl DrawTarget for TerminalDisplay {
                         foreground_color = color;
                     }
 
-                    self.write_pixel(&mut stdout, row, column, foreground_color, background_color)?;
+                    self.write_pixel(row, column, foreground_color, background_color)?;
                 } else {
                     let (_, background) = &mut self.buffer[usize::from(row)][usize::from(column)];
                     // This has to be the top half of the pixel, otherwise we would have taken the
@@ -223,7 +230,6 @@ impl DrawTarget for TerminalDisplay {
                     .unwrap_or(usize::MAX),
             )
         }
-        stdout.flush()?;
         Ok(())
     }
 }
