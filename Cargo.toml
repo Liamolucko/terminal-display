@@ -1,7 +1,13 @@
 [package]
 name = "terminal-display"
 version = "0.1.0"
+authors = ["Liam Murphy <liampm32@gmail.com>"]
 edition = "2021"
+description = "An implementation of `embedded_graphics::DrawTarget` for the terminal"
+repository = "https://github.com/Liamolucko/terminal-display"
+license = "MIT"
+keywords = ["embedded-graphics", "terminal"]
+categories = ["command-line-interface"]
 
 [dependencies]
 crossterm = "0.23.2"
